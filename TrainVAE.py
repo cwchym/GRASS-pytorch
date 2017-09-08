@@ -9,11 +9,8 @@ class myVAE(NN.Module):
     '''
         Train the entire network of VAE for Rvnn!
     '''
-    def __init__(self,symshapes,treekids,symparams,hiddenSize,latentSize,symSize,boxSize,catSize):
+    def __init__(self, hiddenSize,latentSize,symSize,boxSize,catSize):
         super(myVAE, self).__init__()
-        self.shapes = symshapes
-        self.treekids = treekids
-        self.params = symparams
         self.hidden=hiddenSize
         self.latent=latentSize
         self.sym=symSize
@@ -36,77 +33,91 @@ class myVAE(NN.Module):
                     r = math.sqrt(6/(self.hidden+self.hidden+1))
                     m.weight.data = torch.rand(m.weight.data.size())*2*r-r
 
-    def VAEencoder(self):
-        nodeNum = self.treekids.size(1)
-        hOut = Variable(torch.DoubleTensor(nodeNum,self.latent).zero_(), requires_grad = True)
-        leafNum = self.shapes.size(2)
+    def VAEencoder(self,symshapes,treekids,symparams):
+        nodeNum = treekids.size(1)
+        hOut = list(Variable(torch.FloatTensor(1 ,self.latent).zero_(), requires_grad = True) for i in range(nodeNum))
+        leafNum = symshapes.size(2)
         for i in range(nodeNum):
-            if(self.treekids[0,i,:][0] == 0):
+            if(treekids[0, i, :][0] == 0):
                 nodeType = 0
-                input1 = self.shapes[0,:,i]
+                input1 = symshapes[0, :, i].contiguous().view(1, -1).float()
                 input2 = None
-            if(self.treekids[0,i,:][0] != 0 and self.treekids[0,i,:][2] == 0):
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 0):
                 nodeType = 1
-                if(i > leafNum):
-                    input1 = hOut[self.treekids[0,i,0],:]
-                    input2 = hOut[self.treekids[0,i,1],:]
-            elif(self.treekids[0,i,:][0] != 0 and self.treekids[0,i,:][2] == 1):
+                if(i >= leafNum):
+                    input1 = hOut[treekids[0, i, 0]-1]
+                    input2 = hOut[treekids[0, i, 1]-1]
+            elif(treekids[0,i,:][0] != 0 and treekids[0,i,:][2] == 1):
                 nodeType = 2
-                if(i > leafNum):
-                    input1 = hOut[self.treekids[0,i,0],:]
-                    input2 = self.params[0, self.treekids[0,i,0], :]
+                if(i >= leafNum):
+                    input1 = hOut[treekids[0,i,0]-1]
+                    input2 = symparams[:, treekids[0, i, 0] - 1, :].float()
 
-            hOut[i,:] = self.encoder(nodeType,input1,input2)
+            hOut[i] = self.encoder(nodeType,input1,input2)
 
-        return hOut[nodeNum-1,:]
+        return hOut[nodeNum-1]
 
-    def VAEdecoder(self,rd1):
-        nodeNum = self.treekids.size(1); leafNum = self.shapes.size(2)
-        paramOut = Variable(torch.DoubleTensor(self.params.size(1),self.params.size(2)).zero_(), requires_grad = True)
-        paramGT = Variable(torch.DoubleTensor(self.params.size(1),self.params.size(2)).zero_(), requires_grad = True)
-        NClrOut = Variable(torch.DoubleTensor(nodeNum,self.cat).zero_(), requires_grad = True)
-        NClrGroundTruth = Variable(torch.DoubleTensor(nodeNum,1).zero_(), requires_grad = True)
-        hmidOut = Variable(torch.DoubleTensor(nodeNum,self.latent).zero_(), requires_grad = True)
-        hOut = Variable(torch.DoubleTensor(leafNum,self.box).zero_(), requires_grad = True)
-        hmidOut[nodeNum - 1, :] = rd1
+
+    def concate(self, input1):
+        myOut = input1[0]
+        for i in range(1, len(input1)):
+            tmpOut = input1[i]
+            myOut = torch.cat((myOut, tmpOut), 0)
+
+        return myOut
+
+    def VAEdecoder(self, symshapes, treekids, symparams, rd1):
+        nodeNum = treekids.size(1); leafNum = symshapes.size(2)
+        paramOut = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
+        paramGT = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
+        NClrOut = list(Variable(torch.FloatTensor(1, self.cat).zero_(), requires_grad = True) for i in range(nodeNum))
+        NClrGroundTruth = list(Variable(torch.LongTensor(1, 1).zero_(), requires_grad = True) for i in range(nodeNum))
+        hmidOut = list(Variable(torch.FloatTensor(1, self.latent).zero_(), requires_grad = True) for i in range(nodeNum))
+        hOut = list(Variable(torch.FloatTensor(1, self.box).zero_(), requires_grad = True) for i in range(leafNum))
+        hmidOut[nodeNum - 1] = rd1
 
         for i in reversed(range(nodeNum)):
             nodeType = 0
-            if (self.treekids[0, i, :][0] == 0):
+            if (treekids[0, i, :][0] == 0):
                 nodeType = 0
-                NClrGroundTruth[i, :] = Variable(torch.ByteTensor([0]))
-            elif(self.treekids[0,i,:][0] != 0 and self.treekids[0,i,:][2] == 0):
+                NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i,:][2] == 0):
                 #Adjacent Node
                 nodeType = 1
-                NClrGroundTruth[i, :] = Variable(torch.ByteTensor([1]))
-            elif(self.treekids[0,i,:][0] != 0 and self.treekids[0,i,:][2] == 1):
+                NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
                 #Symmetry Node
                 nodeType = 2
-                NClrGroundTruth[i, :] = Variable(torch.ByteTensor([2]))
-                paramGT[i,:] = self.params[0,self.treekids[0, i, 0], :]
+                NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
+                paramGT[i] = symparams[:,treekids[0, i, 0]-1, :].float()
 
-            input1 = hmidOut[i,:]
+            input1 = hmidOut[i]
             tmpOut = self.decoder(nodeType,input1)
 
-            if(self.treekids[0,i,:][0] == 0):
-                hOut[i, :] = tmpOut.narrow(1, 0, self.box)
-                NClrOut[i, :] = tmpOut.narrow(1, self.box, self.box+self.cat)
-            elif(self.treekids[0,i,:][0] != 0 and self.treekids[0,i,:][2] == 0):
-                id1 = self.treekids[0,i,0]
-                id2 = self.treekids[0,i,1]
-                hmidOut[id1, :] = tmpOut.narrow(1, 0, self.latent)
-                hmidOut[id2, :] = tmpOut.narrow(1, self.latent, self.latent+self.latent)
-                NClrOut[i, :] = tmpOut.narrow(1, self.latent+self.latent, self.latent+self.latent+self.cat)
-            elif(self.treekids[0, i, :][0] != 0 and self.treekids[0, i, :][2] == 1):
-                id1 = self.treekids[0, i, 0]
-                hmidOut[id1, :] = tmpOut.narrow(1, 0, self.latent)
-                paramOut[id1, :] = tmpOut.narrow(1, self.latent, self.latent + self.sym)
-                NClrOut[i, :] = tmpOut.narrow(1, self.latent + self.sym, self.latent + self.sym + self.cat)
+            if(treekids[0, i, :][0] == 0):
+                hOut[i] = tmpOut.narrow(1, 0, self.box)
+                NClrOut[i] = tmpOut.narrow(1, self.box, self.cat)
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 0):
+                id1 = treekids[0, i, 0]
+                id2 = treekids[0, i, 1]
+                hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
+                hmidOut[id2-1] = tmpOut.narrow(1, self.latent, self.latent)
+                NClrOut[i] = tmpOut.narrow(1, self.latent+self.latent, self.cat)
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
+                id1 = treekids[0, i, 0]
+                hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
+                paramOut[id1-1] = tmpOut.narrow(1, self.latent, self.sym)
+                NClrOut[i] = tmpOut.narrow(1, self.latent + self.sym, self.cat)
 
+        hOut = self.concate(hOut)
+        paramOut = self.concate(paramOut)
+        paramGT = self.concate(paramGT)
+        NClrOut = self.concate(NClrOut)
+        NClrGroundTruth = self.concate(NClrGroundTruth)
         return hOut, paramOut, paramGT, NClrOut, NClrGroundTruth
 
-    def forward(self):
-        encOutput = self.VAEencoder()
+    def forward(self, symshapes, treekids, symparams):
+        encOutput = self.VAEencoder(symshapes, treekids, symparams)
         re1 = self.tanh(self.ranen1(encOutput))
         re2 = self.ranen2(re1)
 
@@ -120,6 +131,6 @@ class myVAE(NN.Module):
         rd2 = self.tanh(self.rande2(sample_z))
         rd1 = self.tanh(self.rande1(rd2))
 
-        Out, paramOut, paramGT, NClrOut, NClrGroudTruth = self.VAEdecoder(rd1)
+        myOut, paramOut, paramGT, NClrOut, NClrGroudTruth = self.VAEdecoder(symshapes, treekids, symparams, rd1)
 
-        return Out, paramOut, paramGT, NClrOut, NClrGroudTruth, mu, sig
+        return myOut, paramOut, paramGT, NClrOut, NClrGroudTruth, mu, sig

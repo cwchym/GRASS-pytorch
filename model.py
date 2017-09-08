@@ -35,19 +35,19 @@ class RvnnEncoCell(NN.Module):
         #forward operation in Encode Tree of VAE
         # LeafNode below:
         if(treeNodeType == 0):
-            Out = self.tanh(self.BoxEnco(input1))
+            myOut = self.tanh(self.BoxEnco(input1))
         # Adjacent Node:
         elif(treeNodeType == 1):
             tmpInput = torch.cat((input1,input2), 1)
             hiddenOut = self.tanh(self.AdjEnco1(tmpInput))
-            Out = self.tanh(self.AdjEnco2(hiddenOut))
+            myOut = self.tanh(self.AdjEnco2(hiddenOut))
         #Symmetry Node:
         elif(treeNodeType == 2):
             tmpInput = torch.cat((input1,input2), 1)
             hiddenOut = self.tanh(self.symEnco1(tmpInput))
-            Out = self.tanh(self.symEnco2(hiddenOut))
+            myOut = self.tanh(self.symEnco2(hiddenOut))
 
-        return Out
+        return myOut
 
 class RvnnDecoCell(NN.Module):
     '''
@@ -84,23 +84,23 @@ class RvnnDecoCell(NN.Module):
 
     def forward(self,treeNodeType,input1):
         if(treeNodeType == 0):
-            Out=self.tanh(self.BoxDeco(input1))
+            myOut=self.tanh(self.BoxDeco(input1))
             ClrHiddenOut = self.tanh(self.NClr1(input1))
             ClrOut = self.NClr2(ClrHiddenOut)
             self.gLeafcount = self.gLeafcount + 1.0
         elif(treeNodeType == 1):
             hiddenOut = self.tanh(self.AdjDeco2(input1))
-            Out = self.tanh(self.AdjDeco1(hiddenOut))
+            myOut = self.tanh(self.AdjDeco1(hiddenOut))
             ClrHiddenOut=self.tanh(self.NClr1(input1))
             ClrOut = self.NClr2(ClrHiddenOut)
             self.gAssemcount = self.gAssemcount + 1.0
         elif(treeNodeType == 2):
             hiddenOut = self.tanh(self.symDeco2(input1))
-            Out = self.tanh(self.symDeco1(hiddenOut))
+            myOut = self.tanh(self.symDeco1(hiddenOut))
             ClrHiddenOut = self.tanh(self.NClr1(input1))
             ClrOut = self.NClr2(ClrHiddenOut)
             self.gSymcount = self.gSymcount + 1.0
 
-        finalOut = torch.cat((Out,ClrOut), 1)
+        finalOut = torch.cat((myOut,ClrOut), 1)
 
         return finalOut
