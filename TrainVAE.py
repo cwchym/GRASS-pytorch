@@ -71,7 +71,7 @@ class myVAE(NN.Module):
         paramOut = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
         paramGT = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
         NClrOut = list(Variable(torch.FloatTensor(1, self.cat).zero_(), requires_grad = True) for i in range(nodeNum))
-        NClrGroundTruth = list(Variable(torch.LongTensor(1, 1).zero_(), requires_grad = True) for i in range(nodeNum))
+        NClrGroundTruth = list(Variable(torch.FloatTensor(1, self.cat).zero_(), requires_grad = True) for i in range(nodeNum))
         hmidOut = list(Variable(torch.FloatTensor(1, self.latent).zero_(), requires_grad = True) for i in range(nodeNum))
         hOut = list(Variable(torch.FloatTensor(1, self.box).zero_(), requires_grad = True) for i in range(leafNum))
         hmidOut[nodeNum - 1] = rd1
@@ -80,16 +80,19 @@ class myVAE(NN.Module):
             nodeType = 0
             if (treekids[0, i, :][0] == 0):
                 nodeType = 0
-                NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
+                # NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
+                NClrGroundTruth[i] = Variable(torch.FloatTensor([[1, 0, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i,:][2] == 0):
                 #Adjacent Node
                 nodeType = 1
-                NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
+                # NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
+                NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 1, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
                 #Symmetry Node
                 nodeType = 2
-                NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
-                paramGT[i] = symparams[:,treekids[0, i, 0]-1, :].float()
+                # NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
+                NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 0, 1]]))
+                paramGT[treekids[0, i, 0]-1] = symparams[:,treekids[0, i, 0]-1, :].float()
 
             input1 = hmidOut[i]
             tmpOut = self.decoder(nodeType,input1)
@@ -103,7 +106,7 @@ class myVAE(NN.Module):
                 hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
                 hmidOut[id2-1] = tmpOut.narrow(1, self.latent, self.latent)
                 NClrOut[i] = tmpOut.narrow(1, self.latent+self.latent, self.cat)
-            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
+            elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] != 0):
                 id1 = treekids[0, i, 0]
                 hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
                 paramOut[id1-1] = tmpOut.narrow(1, self.latent, self.sym)
@@ -116,6 +119,12 @@ class myVAE(NN.Module):
         NClrGroundTruth = self.concate(NClrGroundTruth)
         return hOut, paramOut, paramGT, NClrOut, NClrGroundTruth
 
+    def reparameterize(self, mu, logvar):
+        std = logvar.mul(0.5).exp_()
+        eps = torch.FloatTensor(std.size()).normal_()
+        eps = Variable(eps)
+        return eps.mul(std).add_(mu)
+
     def forward(self, symshapes, treekids, symparams):
         encOutput = self.VAEencoder(symshapes, treekids, symparams)
         re1 = self.tanh(self.ranen1(encOutput))
@@ -124,13 +133,11 @@ class myVAE(NN.Module):
         mu = re2.narrow(1, 0, self.latent)
         logvar = re2.narrow(1, self.latent, self.latent*2)
 
-        sig = torch.exp(logvar/2)
-        eps = Variable(torch.randn(mu.size()), requires_grad = True)
-        sample_z = mu + sig * eps
+        sample_z = self.reparameterize(mu, logvar)
 
         rd2 = self.tanh(self.rande2(sample_z))
         rd1 = self.tanh(self.rande1(rd2))
 
         myOut, paramOut, paramGT, NClrOut, NClrGroudTruth = self.VAEdecoder(symshapes, treekids, symparams, rd1)
 
-        return myOut, paramOut, paramGT, NClrOut, NClrGroudTruth, mu, sig
+        return myOut, paramOut, paramGT, NClrOut, NClrGroudTruth, mu, logvar

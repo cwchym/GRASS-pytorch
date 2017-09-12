@@ -82,6 +82,13 @@ class RvnnDecoCell(NN.Module):
                     r = math.sqrt(6/(self.hidden+self.hidden+1))
                     m.weight.data = torch.rand(m.weight.data.size())*2*r-r
 
+    def getClass(self,latentCode):
+        ClrHiddenOut = self.tanh(self.NClr1(latentCode))
+        ClrOut = self.NClr2(ClrHiddenOut)
+        myOut = NN.functional.softmax(ClrOut)
+
+        return myOut
+
     def forward(self,treeNodeType,input1):
         if(treeNodeType == 0):
             myOut=self.tanh(self.BoxDeco(input1))
