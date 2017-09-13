@@ -90,22 +90,18 @@ class RvnnDecoCell(NN.Module):
         return myOut
 
     def forward(self,treeNodeType,input1):
+        ClrHiddenOut = self.tanh(self.NClr1(input1))
+        ClrOut = self.NClr2(ClrHiddenOut)
         if(treeNodeType == 0):
             myOut=self.tanh(self.BoxDeco(input1))
-            ClrHiddenOut = self.tanh(self.NClr1(input1))
-            ClrOut = self.NClr2(ClrHiddenOut)
             self.gLeafcount = self.gLeafcount + 1.0
         elif(treeNodeType == 1):
             hiddenOut = self.tanh(self.AdjDeco2(input1))
             myOut = self.tanh(self.AdjDeco1(hiddenOut))
-            ClrHiddenOut=self.tanh(self.NClr1(input1))
-            ClrOut = self.NClr2(ClrHiddenOut)
             self.gAssemcount = self.gAssemcount + 1.0
         elif(treeNodeType == 2):
             hiddenOut = self.tanh(self.symDeco2(input1))
             myOut = self.tanh(self.symDeco1(hiddenOut))
-            ClrHiddenOut = self.tanh(self.NClr1(input1))
-            ClrOut = self.NClr2(ClrHiddenOut)
             self.gSymcount = self.gSymcount + 1.0
 
         finalOut = torch.cat((myOut,ClrOut), 1)

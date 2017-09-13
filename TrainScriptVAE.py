@@ -44,7 +44,7 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
     #      {'params': VAE.rande1.parameters()},
     #      {'params': VAE.rande2.parameters()}],
     #     lr=0.2/20)
-    optimization = torch.optim.SGD(VAE.parameters(), lr = 0.1/20)
+    optimization = torch.optim.SGD(VAE.parameters(), lr = 0.2/20)
 
     histLoss = list()
 
@@ -60,10 +60,10 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
 
             #calculate KL Loss
             KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
-            KLloss = torch.sum(KLD_element).mul(-0.05)
+            KLloss = torch.sum(KLD_element).mul(-0.5)
 
             #calculate Node Classification Loss
-            NClloss = torch.nn.functional.binary_cross_entropy_with_logits(NClrOut, NClrGT).mul_(0.2)
+            NClloss = torch.nn.functional.cross_entropy(NClrOut, NClrGT).mul_(0.2)
 
             #calculate Sym parameters Loss
             paramLoss = torch.nn.functional.mse_loss(paramOut, paramGT)
@@ -107,7 +107,7 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
 
         if(i % 100 == 0 and i != 0):
             torch.save(VAE.state_dict(),'VAE.pkl')
-            for k in range(len(optimization.param_groups)):
-                optimization.param_groups[k]['lr'] = 0.1/20
+            # for k in range(len(optimization.param_groups)):
+            #     optimization.param_groups[k]['lr'] = optimization.param_groups[k]['lr']/2
 
 Train('data/trainingData_chair.mat', 1, True, 200, 80, 8, 12, 3)

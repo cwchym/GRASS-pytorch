@@ -4,6 +4,11 @@ import torch
 import torch.nn as NN
 import model
 from torch.autograd import Variable
+import torch.nn.functional as F
+import Queue as queue
+import numpy as np
+from numpy import linalg as LA
+from GBpy import tools
 
 class myVAE(NN.Module):
     '''
@@ -71,7 +76,7 @@ class myVAE(NN.Module):
         paramOut = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
         paramGT = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
         NClrOut = list(Variable(torch.FloatTensor(1, self.cat).zero_(), requires_grad = True) for i in range(nodeNum))
-        NClrGroundTruth = list(Variable(torch.FloatTensor(1, self.cat).zero_(), requires_grad = True) for i in range(nodeNum))
+        NClrGroundTruth = list(Variable(torch.LongTensor(1, 1).zero_(), requires_grad = True) for i in range(nodeNum))
         hmidOut = list(Variable(torch.FloatTensor(1, self.latent).zero_(), requires_grad = True) for i in range(nodeNum))
         hOut = list(Variable(torch.FloatTensor(1, self.box).zero_(), requires_grad = True) for i in range(leafNum))
         hmidOut[nodeNum - 1] = rd1
@@ -80,18 +85,18 @@ class myVAE(NN.Module):
             nodeType = 0
             if (treekids[0, i, :][0] == 0):
                 nodeType = 0
-                # NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
-                NClrGroundTruth[i] = Variable(torch.FloatTensor([[1, 0, 0]]))
+                NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
+                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[1, 0, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i,:][2] == 0):
                 #Adjacent Node
                 nodeType = 1
-                # NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
-                NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 1, 0]]))
+                NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
+                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 1, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
                 #Symmetry Node
                 nodeType = 2
-                # NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
-                NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 0, 1]]))
+                NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
+                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 0, 1]]))
                 paramGT[treekids[0, i, 0]-1] = symparams[:,treekids[0, i, 0]-1, :].float()
 
             input1 = hmidOut[i]
@@ -124,6 +129,115 @@ class myVAE(NN.Module):
         eps = torch.FloatTensor(std.size()).normal_()
         eps = Variable(eps)
         return eps.mul(std).add_(mu)
+
+    def softmax(self, input, axis=1):
+        input_size = input.size()
+
+        trans_input = input.transpose(axis, len(input_size) - 1)
+        trans_size = trans_input.size()
+
+        input_2d = trans_input.contiguous().view(-1, trans_size[-1])
+
+        soft_max_2d = F.softmax(input_2d)
+
+        soft_max_nd = soft_max_2d.view(*trans_size)
+        return soft_max_nd.transpose(axis, len(input_size) - 1)
+
+    def testVAE(self, num):
+        genShapes = list([] for jj in range(num))
+        for i in range(num):
+            sample_z = torch.FloatTensor(1, self.latent).normal_()
+            sample_z = Variable(sample_z)
+
+            rd2 = self.tanh(self.rande2(sample_z))
+            rd1 = self.tanh(self.rande1(rd2))
+
+            feature = queue.Queue(maxsize = 40)
+            symlist = queue.Queue(maxsize = 40)
+            feature.put(rd1)
+            symlist.put(np.ones((1,10))*10)
+            while not feature.empty():
+                p = feature.get()
+                sfm = self.decoder.tanh(self.decoder.NClr1(p))
+                sf = self.decoder.NClr2(sfm)
+                sm = self.softmax(sf)
+                l_index = np.argmax(sm.data.numpy())
+                tmpOut = self.decoder(l_index,p)
+                if(l_index == 0):
+                    re_box = tmpOut.narrow(1, 0, self.box)
+                    re_box = re_box.data.numpy()
+                    symfeature = symlist.get()
+                    genShapes[i].append(re_box)
+                    if(abs(symfeature[:,0] + 1.0) < 0.15):
+                        folds = 1//symfeature[7]
+                        new_box = re_box.copy()
+                        symfeature[1:4] = symfeature[1:4]/LA.norm(symfeature[1:4])
+                        for kk in range(1, folds):
+                            rotvector = np.append(symfeature[1:4],[symfeature[7]*2*math.pi*kk, 1])
+                            rotm = tools.vrrotmat2vec(rotvector)
+                            center = re_box[:,0:3]
+                            dir_1 = re_box[:,6:9]
+                            dir_2 = re_box[:,9:12]
+                            newcenter = np.dot(rotm, center-symfeature[4:7]) + symfeature[4:7]
+                            new_box[:,0:3] = newcenter
+                            new_box[:,6:9] = np.dot(rotm, dir_1)
+                            new_box[:,9:12] = np.dot(rotm, dir_2)
+                            genShapes[i].append(new_box)
+                    if(abs(symfeature[:,0]) < 0.15):
+                        trans = symfeature[:,1:4]
+                        trans_end = symfeature[:,4:7]
+                        center = re_box[:,0:3]
+                        trans_length = LA.norm(trans)
+                        trans_total = LA.norm(trans_end-center)
+                        folds = trans_total/trans_length
+                        for kk in range(folds):
+                            new_box = re_box.copy()
+                            newcenter = center + kk * trans
+                            new_box[:,0:3] = newcenter
+                            genShapes[i].append(new_box)
+                    if(abs(symfeature[:,0] -1) < 0.15):
+                        ref_normal = symfeature[:,1:4]
+                        ref_normal = ref_normal/LA.norm(ref_normal)
+                        ref_point = symfeature[:,4:7]
+                        new_box = re_box.copy()
+                        center = re_box[:, 0:3]
+                        if(np.dot(ref_normal, np.transpose(ref_point-center)) < 0):
+                            ref_normal = -1*ref_normal
+
+                        newcenter = abs(sum((ref_point-center) * ref_normal))*ref_normal*2 + center
+                        new_box[:, 0:3] = newcenter
+
+                        dir_1 = re_box[:,6:9]
+                        if(np.dot(ref_normal,np.transpose(dir_1)) > 0):
+                            ref_normal = -1 * ref_normal
+
+                        new_box[:, 6:9] = dir_1 - 2*np.dot(dir_1, np.transpose(ref_normal))* ref_normal
+
+                        dir_2 = re_box[:, 9:12]
+                        if(np.dot(ref_normal, np.transpose(dir_2)) > 0):
+                            ref_normal = -ref_normal
+
+                        new_box[:, 9:12] = dir_2 - 2*np.dot(dir_2, np.transpose(ref_normal))*ref_normal
+
+                        genShapes[i].append(new_box)
+                else:
+                    if(l_index == 2):
+                        y1 = tmpOut.narrow(1, 0, self.latent)
+                        feature.put(y1)
+                        symfeature = tmpOut.narrow(1, self.latent, self.sym)
+                        symlist.get()
+                        symlist.put(symfeature.data.numpy())
+                    elif(l_index == 1):
+                        y1 = tmpOut.narrow(1, 0, self.latent)
+                        y2 = tmpOut.narrow(1, self.latent, self.latent)
+                        feature.put(y1)
+                        feature.put(y2)
+                        tmp1 = symlist.get()
+                        symlist.put(tmp1)
+                        symlist.put(tmp1)
+
+        return genShapes
+
 
     def forward(self, symshapes, treekids, symparams):
         encOutput = self.VAEencoder(symshapes, treekids, symparams)
