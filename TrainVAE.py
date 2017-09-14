@@ -63,14 +63,6 @@ class myVAE(NN.Module):
         return hOut[nodeNum-1]
 
 
-    def concate(self, input1):
-        myOut = input1[0]
-        for i in range(1, len(input1)):
-            tmpOut = input1[i]
-            myOut = torch.cat((myOut, tmpOut), 0)
-
-        return myOut
-
     def VAEdecoder(self, symshapes, treekids, symparams, rd1):
         nodeNum = treekids.size(1); leafNum = symshapes.size(2)
         paramOut = list(Variable(torch.FloatTensor(1, symparams.size(2)).zero_(), requires_grad = True) for i in range(symparams.size(1)))
@@ -86,42 +78,37 @@ class myVAE(NN.Module):
             if (treekids[0, i, :][0] == 0):
                 nodeType = 0
                 NClrGroundTruth[i] = Variable(torch.LongTensor([0]))
-                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[1, 0, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i,:][2] == 0):
                 #Adjacent Node
                 nodeType = 1
                 NClrGroundTruth[i] = Variable(torch.LongTensor([1]))
-                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 1, 0]]))
             elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 1):
                 #Symmetry Node
                 nodeType = 2
                 NClrGroundTruth[i] = Variable(torch.LongTensor([2]))
-                # NClrGroundTruth[i] = Variable(torch.FloatTensor([[0, 0, 1]]))
                 paramGT[treekids[0, i, 0]-1] = symparams[:,treekids[0, i, 0]-1, :].float()
 
             input1 = hmidOut[i]
-            tmpOut = self.decoder(nodeType,input1)
+            tmpLeftOut, tmpRightOut, tmpClrOut = self.decoder(nodeType,input1)
 
+            NClrOut[i] = tmpClrOut
             if(treekids[0, i, :][0] == 0):
-                hOut[i] = tmpOut.narrow(1, 0, self.box)
-                NClrOut[i] = tmpOut.narrow(1, self.box, self.cat)
+                hOut[i] = tmpLeftOut
             elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] == 0):
                 id1 = treekids[0, i, 0]
                 id2 = treekids[0, i, 1]
-                hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
-                hmidOut[id2-1] = tmpOut.narrow(1, self.latent, self.latent)
-                NClrOut[i] = tmpOut.narrow(1, self.latent+self.latent, self.cat)
+                hmidOut[id1-1] = tmpLeftOut
+                hmidOut[id2-1] = tmpRightOut
             elif(treekids[0, i, :][0] != 0 and treekids[0, i, :][2] != 0):
                 id1 = treekids[0, i, 0]
-                hmidOut[id1-1] = tmpOut.narrow(1, 0, self.latent)
-                paramOut[id1-1] = tmpOut.narrow(1, self.latent, self.sym)
-                NClrOut[i] = tmpOut.narrow(1, self.latent + self.sym, self.cat)
+                hmidOut[id1-1] = tmpLeftOut
+                paramOut[id1-1] = tmpRightOut
 
-        hOut = self.concate(hOut)
-        paramOut = self.concate(paramOut)
-        paramGT = self.concate(paramGT)
-        NClrOut = self.concate(NClrOut)
-        NClrGroundTruth = self.concate(NClrGroundTruth)
+        hOut = torch.stack(hOut).squeeze()
+        paramOut = torch.stack(paramOut).squeeze()
+        paramGT = torch.stack(paramGT).squeeze()
+        NClrOut = torch.stack(NClrOut).squeeze()
+        NClrGroundTruth = torch.stack(NClrGroundTruth).squeeze()
         return hOut, paramOut, paramGT, NClrOut, NClrGroundTruth
 
     def reparameterize(self, mu, logvar):
@@ -130,24 +117,20 @@ class myVAE(NN.Module):
         eps = Variable(eps)
         return eps.mul(std).add_(mu)
 
-    def softmax(self, input, axis=1):
-        input_size = input.size()
-
-        trans_input = input.transpose(axis, len(input_size) - 1)
-        trans_size = trans_input.size()
-
-        input_2d = trans_input.contiguous().view(-1, trans_size[-1])
-
-        soft_max_2d = F.softmax(input_2d)
-
-        soft_max_nd = soft_max_2d.view(*trans_size)
-        return soft_max_nd.transpose(axis, len(input_size) - 1)
-
-    def testVAE(self, num):
+    def testVAE(self, num, symshapes, treekids, symparams):
         genShapes = list([] for jj in range(num))
         for i in range(num):
-            sample_z = torch.FloatTensor(1, self.latent).normal_()
-            sample_z = Variable(sample_z)
+            encOutput = self.VAEencoder(symshapes, treekids, symparams)
+            re1 = self.tanh(self.ranen1(encOutput))
+            re2 = self.ranen2(re1)
+
+            mu = re2.narrow(1, 0, self.latent)
+            logvar = re2.narrow(1, self.latent, self.latent)
+
+            sample_z = self.reparameterize(mu, logvar)
+
+            # sample_z = torch.FloatTensor(1, self.latent).normal_()
+            # sample_z = Variable(sample_z)
 
             rd2 = self.tanh(self.rande2(sample_z))
             rd1 = self.tanh(self.rande1(rd2))
@@ -158,16 +141,14 @@ class myVAE(NN.Module):
             symlist.put(np.ones((1,10))*10)
             while not feature.empty():
                 p = feature.get()
-                sfm = self.decoder.tanh(self.decoder.NClr1(p))
-                sf = self.decoder.NClr2(sfm)
-                sm = self.softmax(sf)
+                sm = self.decoder.getClass(p)
                 l_index = np.argmax(sm.data.numpy())
-                tmpOut = self.decoder(l_index,p)
+                tmpLeftOut, tmpRightOut, NClr = self.decoder(l_index,p)
                 if(l_index == 0):
-                    re_box = tmpOut.narrow(1, 0, self.box)
+                    re_box = tmpLeftOut
                     re_box = re_box.data.numpy()
                     symfeature = symlist.get()
-                    genShapes[i].append(re_box)
+                    genShapes[i].append(re_box.squeeze())
                     if(abs(symfeature[:,0] + 1.0) < 0.15):
                         folds = 1//symfeature[7]
                         new_box = re_box.copy()
@@ -182,7 +163,7 @@ class myVAE(NN.Module):
                             new_box[:,0:3] = newcenter
                             new_box[:,6:9] = np.dot(rotm, dir_1)
                             new_box[:,9:12] = np.dot(rotm, dir_2)
-                            genShapes[i].append(new_box)
+                            genShapes[i].append(new_box.squeeze())
                     if(abs(symfeature[:,0]) < 0.15):
                         trans = symfeature[:,1:4]
                         trans_end = symfeature[:,4:7]
@@ -194,7 +175,7 @@ class myVAE(NN.Module):
                             new_box = re_box.copy()
                             newcenter = center + kk * trans
                             new_box[:,0:3] = newcenter
-                            genShapes[i].append(new_box)
+                            genShapes[i].append(new_box.squeeze())
                     if(abs(symfeature[:,0] -1) < 0.15):
                         ref_normal = symfeature[:,1:4]
                         ref_normal = ref_normal/LA.norm(ref_normal)
@@ -219,17 +200,17 @@ class myVAE(NN.Module):
 
                         new_box[:, 9:12] = dir_2 - 2*np.dot(dir_2, np.transpose(ref_normal))*ref_normal
 
-                        genShapes[i].append(new_box)
+                        genShapes[i].append(new_box.squeeze())
                 else:
                     if(l_index == 2):
-                        y1 = tmpOut.narrow(1, 0, self.latent)
+                        y1 = tmpLeftOut
                         feature.put(y1)
-                        symfeature = tmpOut.narrow(1, self.latent, self.sym)
+                        symfeature = tmpRightOut
                         symlist.get()
                         symlist.put(symfeature.data.numpy())
                     elif(l_index == 1):
-                        y1 = tmpOut.narrow(1, 0, self.latent)
-                        y2 = tmpOut.narrow(1, self.latent, self.latent)
+                        y1 = tmpLeftOut
+                        y2 = tmpRightOut
                         feature.put(y1)
                         feature.put(y2)
                         tmp1 = symlist.get()
@@ -245,7 +226,7 @@ class myVAE(NN.Module):
         re2 = self.ranen2(re1)
 
         mu = re2.narrow(1, 0, self.latent)
-        logvar = re2.narrow(1, self.latent, self.latent*2)
+        logvar = re2.narrow(1, self.latent, self.latent)
 
         sample_z = self.reparameterize(mu, logvar)
 

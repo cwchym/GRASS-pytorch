@@ -90,8 +90,8 @@ def showGenshapes(genshapes):
         ax.set_zlim(-0.7, 0.7)
 
         for jj in range(len(recover_boxes)):
-            p = recover_boxes[jj][0]
-            draw(ax, p, cmap(float(jj)/np.shape(recover_boxes)[1]))
+            p = recover_boxes[jj][:]
+            draw(ax, p, cmap(float(jj)/len(recover_boxes)))
 
         plt.show()
 

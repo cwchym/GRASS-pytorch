@@ -5,6 +5,7 @@ from data_loader import get_loader
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import matplotlib
+import numpy as np
 
 def update_line(hl, ax, new_data):
     hl.set_xdata(range(len(new_data)))
@@ -43,7 +44,7 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
     #      {'params': VAE.ranen2.parameters()},
     #      {'params': VAE.rande1.parameters()},
     #      {'params': VAE.rande2.parameters()}],
-    #     lr=0.2/20)
+    #      lr=0.2/20)
     optimization = torch.optim.SGD(VAE.parameters(), lr = 0.2/20)
 
     histLoss = list()
@@ -51,7 +52,8 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
     for i in range(1500):
         batchLoss = list()
         for j,d in enumerate(data):
-            symshapes = Variable(d['symshapes'])
+            boxes = d['boxes']
+            symshapes = Variable(d['symshapes'].float())
             treekids = d['treekids']
             symparams = Variable(d['symparams'])
 
@@ -62,19 +64,31 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
             KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
             KLloss = torch.sum(KLD_element).mul(-0.5)
 
-            #calculate Node Classification Loss
-            NClloss = torch.nn.functional.cross_entropy(NClrOut, NClrGT).mul_(0.2)
+            # calculate Node Classification Loss
+            finalNCl = torch.nn.functional.cross_entropy(NClrOut, NClrGT).mul_(0.2).mul_(NClrGT.size(0))
 
-            #calculate Sym parameters Loss
-            paramLoss = torch.nn.functional.mse_loss(paramOut, paramGT)
+            # finalNCl = Variable(torch.FloatTensor([0]))
+            # for ii in range(np.shape(NClrGT)[0]):
+            #     finalNCl.add_(torch.nn.functional.cross_entropy(NClrOut[ii], NClrGT[ii]).mul_(0.2))
+
+            # #calculate Sym parameters Loss
+            finalPL = torch.nn.functional.mse_loss(paramOut, paramGT).mul_(paramGT.size(0))
+
+            # finalPL = Variable(torch.FloatTensor([0]))
+            # for ii in range(np.shape(paramGT)[0]):
+            #     finalPL.add_(torch.nn.functional.mse_loss(paramOut[ii], paramGT[ii]))
 
             #calculate reconstruction Loss
-            tmpshapes = VAE.concate(symshapes.float())
-            reconLoss = torch.nn.functional.mse_loss(myOut, tmpshapes).mul_(0.8)
+            symshapes = torch.t(symshapes.squeeze())
+            finalRL = torch.nn.functional.mse_loss(myOut, symshapes).mul_(0.8).mul_(myOut.size(0))
+
+            # finalRL = Variable(torch.FloatTensor([0]))
+            # for ii in range(np.shape(myOut)[0]):
+            #     finalRL.add_(torch.nn.functional.mse_loss(myOut[ii], symshapes[:, :, ii]).mul_(0.8))
 
             #final Loss
             FinalLoss = Variable(torch.FloatTensor([0]))
-            FinalLoss = FinalLoss.add_(KLloss).add_(NClloss).add_(paramLoss).add_(reconLoss)
+            FinalLoss = FinalLoss.add_(KLloss).add_(finalNCl).add_(finalPL).add_(finalRL)
             batchLoss.append(FinalLoss.data.numpy())
             # leafcount = VAE.decoder.gLeafcount
             # gAssemcount = VAE.decoder.gAssemcount
@@ -103,9 +117,10 @@ def Train(path, batch, shuffle, hiddenSize, latentSize, symSize, boxSize, catSiz
 
             FinalLoss.backward()
 
+
         update_line(hl, ax, histLoss)
 
-        if(i % 100 == 0 and i != 0):
+        if(i % 10 == 0 and i != 0):
             torch.save(VAE.state_dict(),'VAE.pkl')
             # for k in range(len(optimization.param_groups)):
             #     optimization.param_groups[k]['lr'] = optimization.param_groups[k]['lr']/2
